@@ -17,38 +17,36 @@ use std::{
 // Sign mask for the flags field. A value of zero in this bit indicates a
 // positive Decimal value, and a value of one in this bit indicates a
 // negative Decimal value.
-const SIGN_MASK: u32 = 0x8000_0000;
-const UNSIGN_MASK: u32 = 0x4FFF_FFFF;
+const SIGN_MASK: u128 = 0x8000_0000_0000_0000_0000_0000_0000_0000;
+const UNSIGN_MASK: u128 = 0x4FFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF;
 
 // Scale mask for the flags field. This byte in the flags field contains
 // the power of 10 to divide the Decimal value by. The scale byte must
 // contain a value between 0 and 28 inclusive.
-const SCALE_MASK: u32 = 0x00FF_0000;
-const U8_MASK: u32 = 0x0000_00FF;
+const SCALE_MASK: u128 = 0x00FF_0000_0000_0000_0000_0000_0000_0000;
+const CLEAR_SCALE_MASK: u128 = 0xFF00_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF;
+const U8_MASK: u128 = 0x0000_0000_0000_0000_0000_0000_0000_00FF;
 const U32_MASK: u64 = 0xFFFF_FFFF;
 
 // Number of bits scale is shifted by.
-const SCALE_SHIFT: u32 = 16;
+const SCALE_SHIFT: u128 = 112;
 // Number of bits sign is shifted by.
-const SIGN_SHIFT: u32 = 31;
+const SIGN_SHIFT: u128 = 127;
 
 // The maximum supported precision
 const MAX_PRECISION: u32 = 28;
+const MAX_I128_REPR: i128 = 0x0000_0000_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF;
+const MIN_I128_REPR: i128 = 0x1000_0000_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF;
 
 static ONE_INTERNAL_REPR: [u32; 3] = [1, 0, 0];
 
-const MIN: Decimal = Decimal {
-    flags: 2_147_483_648,
-    lo: 4_294_967_295,
-    mid: 4_294_967_295,
-    hi: 4_294_967_295,
+const MIN_DECIMAL: Decimal = Decimal {
+    // Sign negative, max value
+    data: 0x8000_0000_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF,
 };
 
-const MAX: Decimal = Decimal {
-    flags: 0,
-    lo: 4_294_967_295,
-    mid: 4_294_967_295,
-    hi: 4_294_967_295,
+const MAX_DECIMAL: Decimal = Decimal {
+    data: 0x0000_0000_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF,
 };
 
 // Fast access for 10^n where n is 0-9
@@ -101,12 +99,7 @@ pub struct Decimal {
     // Bits 16-23: Contains "e", a value between 0-28 that indicates the scale
     // Bits 24-30: unused
     // Bit 31: the sign of the Decimal value, 0 meaning positive and 1 meaning negative.
-    flags: u32,
-    // The lo, mid, hi, and flags fields contain the representation of the
-    // Decimal value as a 96-bit integer.
-    hi: u32,
-    lo: u32,
-    mid: u32,
+    data: u128,
 }
 
 /// `RoundingStrategy` represents the different strategies that can be used by
@@ -140,29 +133,26 @@ impl Decimal {
     /// let pi = Decimal::new(3141, 3);
     /// assert_eq!(pi.to_string(), "3.141");
     /// ```
-    pub fn new(num: i64, scale: u32) -> Decimal {
+    pub fn new(num: i128, scale: u32) -> Result<Decimal, Error> {
         if scale > MAX_PRECISION {
-            panic!(
-                "Scale exceeds the maximum precision allowed: {} > {}",
-                scale, MAX_PRECISION
-            );
+            return Err(Error::new(format!("Scale exceeds the maximum precision allowed: {} > {}",
+                                          scale, MAX_PRECISION)));
         }
-        let flags: u32 = scale << SCALE_SHIFT;
+        if num > MAX_I128_REPR {
+            return Err(Error::new("Number exceeds maximum value that can be represented"));
+        } else if num < MIN_I128_REPR {
+            return Err(Error::new("Number exceeds minimum value that can be represented"));
+        }
+        let flags: u128 = u128::from(scale) << SCALE_SHIFT;
         if num < 0 {
-            let pos_num = num.wrapping_neg() as u64;
-            return Decimal {
-                flags: flags | SIGN_MASK,
-                hi: 0,
-                lo: (pos_num & U32_MASK) as u32,
-                mid: ((pos_num >> 32) & U32_MASK) as u32,
-            };
+            let pos_num = num.wrapping_neg() as u128;
+            return Ok(Decimal {
+                data: pos_num | flags | SIGN_MASK,
+            });
         }
-        Decimal {
-            flags,
-            hi: 0,
-            lo: (num as u64 & U32_MASK) as u32,
-            mid: ((num as u64 >> 32) & U32_MASK) as u32,
-        }
+        Ok(Decimal {
+            data: num as u128 | flags,
+        })
     }
 
     /// Returns a `Decimal` using the instances constituent parts.
@@ -185,10 +175,7 @@ impl Decimal {
     /// ```
     pub const fn from_parts(lo: u32, mid: u32, hi: u32, negative: bool, scale: u32) -> Decimal {
         Decimal {
-            lo: lo,
-            mid: mid,
-            hi: hi,
-            flags: flags(negative, scale),
+            data: flags(negative, scale) << 96 | u128::from(hi) << 64 | u128::from(mid) << 32 | u128::from(lo),
         }
     }
 
@@ -244,7 +231,7 @@ impl Decimal {
     /// ```
     #[inline]
     pub const fn scale(&self) -> u32 {
-        ((self.flags & SCALE_MASK) >> SCALE_SHIFT) as u32
+        ((self.data & SCALE_MASK) >> SCALE_SHIFT) as u32
     }
 
     /// An optimized method for changing the sign of a decimal number.
@@ -264,9 +251,9 @@ impl Decimal {
     /// ```
     pub fn set_sign(&mut self, positive: bool) {
         if positive {
-            self.flags &= UNSIGN_MASK;
+            self.data &= UNSIGN_MASK;
         } else {
-            self.flags |= SIGN_MASK;
+            self.data |= SIGN_MASK;
         }
     }
 
@@ -289,7 +276,7 @@ impl Decimal {
         if scale > MAX_PRECISION {
             return Err(Error::new("Scale exceeds maximum precision"));
         }
-        self.flags = (scale << SCALE_SHIFT) | (self.flags & SIGN_MASK);
+        self.data = (self.data & CLEAR_SCALE_MASK) | (u128::from(scale) << SCALE_SHIFT);
         Ok(())
     }
 
@@ -302,22 +289,26 @@ impl Decimal {
     /// * Bytes 13-16: high portion of `m`
     pub const fn serialize(&self) -> [u8; 16] {
         [
-            (self.flags & U8_MASK) as u8,
-            ((self.flags >> 8) & U8_MASK) as u8,
-            ((self.flags >> 16) & U8_MASK) as u8,
-            ((self.flags >> 24) & U8_MASK) as u8,
-            (self.lo & U8_MASK) as u8,
-            ((self.lo >> 8) & U8_MASK) as u8,
-            ((self.lo >> 16) & U8_MASK) as u8,
-            ((self.lo >> 24) & U8_MASK) as u8,
-            (self.mid & U8_MASK) as u8,
-            ((self.mid >> 8) & U8_MASK) as u8,
-            ((self.mid >> 16) & U8_MASK) as u8,
-            ((self.mid >> 24) & U8_MASK) as u8,
-            (self.hi & U8_MASK) as u8,
-            ((self.hi >> 8) & U8_MASK) as u8,
-            ((self.hi >> 16) & U8_MASK) as u8,
-            ((self.hi >> 24) & U8_MASK) as u8,
+            // flags
+            ((self.data >> 96) & U8_MASK) as u8,
+            ((self.data >> 104) & U8_MASK) as u8,
+            ((self.data >> 112) & U8_MASK) as u8,
+            ((self.data >> 120) & U8_MASK) as u8,
+            // lo
+            (self.data & U8_MASK) as u8,
+            ((self.data >> 8) & U8_MASK) as u8,
+            ((self.data >> 16) & U8_MASK) as u8,
+            ((self.data >> 24) & U8_MASK) as u8,
+            // mid
+            ((self.data >> 32) & U8_MASK) as u8,
+            ((self.data >> 40) & U8_MASK) as u8,
+            ((self.data >> 48) & U8_MASK) as u8,
+            ((self.data >> 56) & U8_MASK) as u8,
+            // hi
+            ((self.data >> 64) & U8_MASK) as u8,
+            ((self.data >> 72) & U8_MASK) as u8,
+            ((self.data >> 80) & U8_MASK) as u8,
+            ((self.data >> 88) & U8_MASK) as u8,
         ]
     }
 
@@ -363,12 +354,12 @@ impl Decimal {
 
     /// Returns the minimum possible number that `Decimal` can represent.
     pub const fn min_value() -> Decimal {
-        MIN
+        MIN_DECIMAL
     }
 
     /// Returns the maximum possible number that `Decimal` can represent.
     pub const fn max_value() -> Decimal {
-        MAX
+        MAX_DECIMAL
     }
 
     /// Returns a new `Decimal` integral with no fractional portion.
@@ -739,26 +730,6 @@ impl Decimal {
             mid: self.mid,
         }
     }
-
-    /// Convert `Decimal` to an internal representation of the underlying struct. This is useful
-    /// for debugging the internal state of the object.
-    ///
-    /// # Important Disclaimer
-    /// This is primarily intended for library maintainers. The internal representation of a
-    /// `Decimal` is considered "unstable" for public use.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use rust_decimal::Decimal;
-    /// use std::str::FromStr;
-    ///
-    /// let pi = Decimal::from_str("3.1415926535897932384626433832").unwrap();
-    /// assert_eq!(format!("{:?}", pi), "3.1415926535897932384626433832");
-    /// assert_eq!(format!("{:?}", pi.unpack()), "UnpackedDecimal { \
-    ///     is_negative: false, scale: 28, hi: 1703060790, mid: 185874565, lo: 1102470952 \
-    /// }");
-    /// ```
 
     #[inline(always)]
     pub(crate) fn mantissa_array3(&self) -> [u32; 3] {
@@ -1363,8 +1334,8 @@ enum DivResult {
 }
 
 #[inline]
-const fn flags(neg: bool, scale: u32) -> u32 {
-    (scale << SCALE_SHIFT) | ((neg as u32) << SIGN_SHIFT)
+const fn flags(neg: bool, scale: u32) -> u128 {
+    (u128::from(scale) << SCALE_SHIFT) | ((neg as u128) << SIGN_SHIFT)
 }
 
 /// Rescales the given decimals to equivalent scales.
@@ -1967,10 +1938,7 @@ macro_rules! forward_all_binop {
 impl Zero for Decimal {
     fn zero() -> Decimal {
         Decimal {
-            flags: 0,
-            hi: 0,
-            lo: 0,
-            mid: 0,
+            data: 0,
         }
     }
 
@@ -1982,10 +1950,7 @@ impl Zero for Decimal {
 impl One for Decimal {
     fn one() -> Decimal {
         Decimal {
-            flags: 0,
-            hi: 0,
-            lo: 1,
-            mid: 0,
+            data: 1,
         }
     }
 }
@@ -2151,56 +2116,38 @@ impl FromStr for Decimal {
 
 impl FromPrimitive for Decimal {
     fn from_i32(n: i32) -> Option<Decimal> {
-        let flags: u32;
-        let value_copy: i64;
+        let value: u128;
         if n >= 0 {
-            flags = 0;
-            value_copy = n as i64;
+            value = n as u128;
         } else {
-            flags = SIGN_MASK;
-            value_copy = -(n as i64);
+            value = n.wrapping_neg() | SIGN_MASK;
         }
         Some(Decimal {
-            flags,
-            lo: value_copy as u32,
-            mid: 0,
-            hi: 0,
+            data: value,
         })
     }
 
     fn from_i64(n: i64) -> Option<Decimal> {
-        let flags: u32;
-        let value_copy: i128;
+        let value: u128;
         if n >= 0 {
-            flags = 0;
-            value_copy = n as i128;
+            value = n as u128;
         } else {
-            flags = SIGN_MASK;
-            value_copy = -(n as i128);
+            value = n.wrapping_neg() | SIGN_MASK;
         }
         Some(Decimal {
-            flags,
-            lo: value_copy as u32,
-            mid: (value_copy >> 32) as u32,
-            hi: 0,
+            data: value,
         })
     }
 
     fn from_u32(n: u32) -> Option<Decimal> {
         Some(Decimal {
-            flags: 0,
-            lo: n,
-            mid: 0,
-            hi: 0,
+            data: n as u128
         })
     }
 
     fn from_u64(n: u64) -> Option<Decimal> {
         Some(Decimal {
-            flags: 0,
-            lo: n as u32,
-            mid: (n >> 32) as u32,
-            hi: 0,
+            data: n as u128,
         })
     }
 
@@ -2411,7 +2358,7 @@ impl Neg for Decimal {
     type Output = Decimal;
 
     fn neg(self) -> Decimal {
-        -&self
+        -self
     }
 }
 
@@ -2419,12 +2366,11 @@ impl<'a> Neg for &'a Decimal {
     type Output = Decimal;
 
     fn neg(self) -> Decimal {
-        Decimal {
-            flags: flags(!self.is_sign_negative(), self.scale()),
-            hi: self.hi,
-            lo: self.lo,
-            mid: self.mid,
+        let copy = self.copy();
+        if !self.is_sign_negative() {
+            copy.set_sign(false);
         }
+        copy
     }
 }
 
