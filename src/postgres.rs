@@ -7,33 +7,21 @@ use std::{convert::TryInto, error, fmt, result::*};
 use crate::decimal::{div_by_u32, is_all_zero, mul_by_u32};
 
 const DECIMALS: [Decimal; 15] = [
-    Decimal::from_parts(1, 0, 0, false, 28),
-    Decimal::from_parts(1, 0, 0, false, 24),
-    Decimal::from_parts(1, 0, 0, false, 20),
-    Decimal::from_parts(1, 0, 0, false, 16),
-    Decimal::from_parts(1, 0, 0, false, 12),
-    Decimal::from_parts(1, 0, 0, false, 8),
-    Decimal::from_parts(1, 0, 0, false, 4),
-    Decimal::from_parts(1, 0, 0, false, 0),
-    Decimal::from_parts(1_0000, 0, 0, false, 0),
-    Decimal::from_parts(1_0000_0000, 0, 0, false, 0),
-    Decimal::from_parts(
-        1_0000_0000_0000u64 as u32,
-        (1_0000_0000_0000u64 >> 32) as u32,
-        0,
-        false,
-        0,
-    ),
-    Decimal::from_parts(
-        1_0000_0000_0000_0000u64 as u32,
-        (1_0000_0000_0000_0000u64 >> 32) as u32,
-        0,
-        false,
-        0,
-    ),
-    Decimal::from_parts(1661992960, 1808227885, 5, false, 0),
-    Decimal::from_parts(2701131776, 466537709, 54210, false, 0),
-    Decimal::from_parts(268435456, 1042612833, 542101086, false, 0),
+    Decimal::from_parts(1, false, 28),
+    Decimal::from_parts(1, false, 24),
+    Decimal::from_parts(1, false, 20),
+    Decimal::from_parts(1, false, 16),
+    Decimal::from_parts(1, false, 12),
+    Decimal::from_parts(1, false, 8),
+    Decimal::from_parts(1, false, 4),
+    Decimal::from_parts(1, false, 0),
+    Decimal::from_parts(1_0000, false, 0),
+    Decimal::from_parts(1_0000_0000, false, 0),
+    Decimal::from_parts(1_0000_0000_0000, false, 0),
+    Decimal::from_parts(1_0000_0000_0000_0000, false, 0),
+    Decimal::from_parts(1_0000_0000_0000_0000_0000, false, 0),
+    Decimal::from_parts(1_0000_0000_0000_0000_0000_0000, false, 0),
+    Decimal::from_parts(1_0000_0000_0000_0000_0000_0000_0000, false, 0),
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -74,7 +62,7 @@ impl Decimal {
         // Read all of the groups
         let mut groups = digits
             .into_iter()
-            .map(|d| Decimal::new(d as i64, 0))
+            .map(|d| Decimal::new(d as i128, 0))
             .collect::<Vec<_>>();
         groups.reverse();
 
@@ -88,10 +76,10 @@ impl Decimal {
         let mut scale = (num_groups as i16 - weight - 1) as i32 * 4;
         // Scale could be negative
         if scale < 0 {
-            result *= Decimal::new(10i64.pow((-scale) as u32), 0);
+            result *= Decimal::new(10i128.pow((-scale) as u32), 0);
             scale = 0;
         } else if scale > fixed_scale {
-            result /= Decimal::new(10i64.pow((scale - fixed_scale) as u32), 0);
+            result /= Decimal::new(10i128.pow((scale - fixed_scale) as u32), 0);
             scale = fixed_scale;
         }
 
@@ -586,13 +574,13 @@ mod postgres {
                 Decimal::new(1, 8),
                 Decimal::new(1, 4),
                 Decimal::new(1, 0),
-                Decimal::new(10000, 0),
-                Decimal::new(100000000, 0),
-                Decimal::new(1000000000000, 0),
-                Decimal::new(10000000000000000, 0),
-                Decimal::from_parts(1661992960, 1808227885, 5, false, 0),
-                Decimal::from_parts(2701131776, 466537709, 54210, false, 0),
-                Decimal::from_parts(268435456, 1042612833, 542101086, false, 0),
+                Decimal::new(1_0000, 0),
+                Decimal::new(1_0000_0000, 0),
+                Decimal::new(1_0000_0000_0000, 0),
+                Decimal::new(1_0000_0000_0000_0000, 0),
+                Decimal::new(1_0000_0000_0000_0000_0000, 0),
+                Decimal::new(1_0000_0000_0000_0000_0000_0000, 0),
+                Decimal::new(1_0000_0000_0000_0000_0000_0000_0000, 0),
             ];
 
             assert_eq!(&expected_decimals[..], &DECIMALS[..]);

@@ -22,12 +22,12 @@ fn it_creates_a_new_negative_decimal() {
 
 #[test]
 fn it_creates_a_new_decimal_using_numeric_boundaries() {
-    let a = Decimal::new(i64::max_value(), 2);
+    let a = Decimal::new(i64::max_value() as i128, 2);
     assert_eq!(a.is_sign_negative(), false);
     assert_eq!(a.scale(), 2);
     assert_eq!("92233720368547758.07", a.to_string());
 
-    let b = Decimal::new(i64::min_value(), 2);
+    let b = Decimal::new(i64::min_value() as i128, 2);
     assert_eq!(b.is_sign_negative(), true);
     assert_eq!(b.scale(), 2);
     assert_eq!("-92233720368547758.08", b.to_string());
@@ -1267,7 +1267,7 @@ fn it_can_reject_invalid_formats() {
 
 #[test]
 fn it_can_parse_individual_parts() {
-    let pi = Decimal::from_parts(1102470952, 185874565, 1703060790, false, 28);
+    let pi = Decimal::from_legacy_parts(1102470952, 185874565, 1703060790, false, 28);
     assert_eq!(pi.to_string(), "3.1415926535897932384626433832");
 }
 

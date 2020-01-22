@@ -27,13 +27,11 @@ pub fn dec(input: TokenStream) -> TokenStream {
 
     let unpacked = decimal.unpack();
     // We need to further unpack these for quote for now
-    let lo = unpacked.lo;
-    let mid = unpacked.mid;
-    let hi = unpacked.hi;
+    let value = unpacked.value;
     let negative = unpacked.is_negative;
     let scale = unpacked.scale;
     let expanded = quote! {
-        ::rust_decimal::Decimal::from_parts(#lo, #mid, #hi, #negative, #scale)
+        ::rust_decimal::Decimal::from_parts(#value, #negative, #scale)
     };
     expanded.into()
 }

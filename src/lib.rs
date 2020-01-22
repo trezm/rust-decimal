@@ -32,7 +32,7 @@
 //!
 //! // Using the raw decimal representation
 //! // 3.1415926535897932384626433832
-//! let pi = Decimal::from_parts(1102470952, 185874565, 1703060790, false, 28);
+//! let pi = Decimal::from_parts(31415926535897932384626433832, false, 28);
 //! ```
 //!
 mod decimal;
