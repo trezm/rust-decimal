@@ -283,25 +283,25 @@ fn it_adds_decimals() {
         ),
         (
             "108053.27500000000000000000000",
-                 "0.00000000000000000000000",
+            "0.00000000000000000000000",
             "108053.27500000000000000000000",
         ),
         (
             "108053.27500000000000000000000",
             // This zero value has too high precision and will be trimmed
-                 "0.000000000000000000000000",
+            "0.000000000000000000000000",
             "108053.27500000000000000000000",
         ),
         (
             "108053.27500000000000000000000",
             // This value has too high precision and will be rounded
-                 "0.000000000000000000000001",
+            "0.000000000000000000000001",
             "108053.27500000000000000000000",
         ),
         (
             "108053.27500000000000000000000",
             // This value has too high precision and will be rounded
-                 "0.000000000000000000000005",
+            "0.000000000000000000000005",
             "108053.27500000000000000000001",
         ),
         (
@@ -1014,6 +1014,10 @@ fn it_can_normalize() {
         ("1", "1"),
         ("1.1", "1.1"),
         ("1.0001", "1.0001"),
+        ("-0", "0"),
+        ("-0.0", "0"),
+        ("-0.010", "-0.01"),
+        ("0.0", "0"),
     ];
 
     for &(value, expected) in tests {
@@ -1292,11 +1296,20 @@ fn it_panics_when_scale_too_large() {
     let _ = Decimal::new(1, 29);
 }
 
+#[test]
+fn test_zero_eq_negative_zero() {
+    let zero: Decimal = 0.into();
+
+    assert!(zero == zero);
+    assert!(-zero == zero);
+    assert!(zero == -zero);
+}
+
 #[cfg(feature = "postgres")]
 #[test]
 fn to_from_sql() {
-    use postgres::types::{FromSql, Kind, ToSql, Type};
     use bytes::BytesMut;
+    use postgres::types::{FromSql, Kind, ToSql, Type};
 
     let tests = &[
         "3950.123456",
@@ -1331,4 +1344,83 @@ fn to_from_sql() {
 
         assert_eq!(input, output);
     }
+}
+
+fn hash_it(d: Decimal) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hash;
+    use std::hash::Hasher;
+
+    let mut h = DefaultHasher::new();
+    d.hash(&mut h);
+    h.finish()
+}
+
+#[test]
+fn it_computes_equal_hashes_for_equal_values() {
+    // From the Rust Hash docs:
+    //
+    // "When implementing both Hash and Eq, it is important that the following property holds:
+    //
+    //     k1 == k2 -> hash(k1) == hash(k2)"
+
+    let k1 = Decimal::from_str("1").unwrap();
+    let k2 = Decimal::from_str("1.0").unwrap();
+    let k3 = Decimal::from_str("1.00").unwrap();
+    let k4 = Decimal::from_str("1.01").unwrap();
+
+    assert_eq!(k1, k2);
+    assert_eq!(k1, k3);
+    assert_ne!(k1, k4);
+
+    let h1 = hash_it(k1);
+    let h2 = hash_it(k2);
+    let h3 = hash_it(k3);
+    let h4 = hash_it(k4);
+
+    assert_eq!(h1, h2);
+    assert_eq!(h1, h3);
+    assert_ne!(h1, h4);
+
+    // Test the application of Hash calculation to a HashMap.
+
+    use std::collections::HashMap;
+
+    let mut map = HashMap::new();
+
+    map.insert(k1, k1.to_string());
+    // map[k2] should overwrite map[k1] because k1 == k2.
+    map.insert(k2, k2.to_string());
+
+    assert_eq!("1.0", map.get(&k3).expect("could not get k3"));
+    assert_eq!(1, map.len());
+
+    // map[k3] should overwrite map[k2] because k3 == k2.
+    map.insert(k3, k3.to_string());
+    // map[k4] should not overwrite map[k3] because k4 != k3.
+    map.insert(k4, k4.to_string());
+
+    assert_eq!(2, map.len());
+    assert_eq!("1.00", map.get(&k1).expect("could not get k1"));
+}
+
+#[test]
+fn it_computes_equal_hashes_for_positive_and_negative_zero() {
+    // Verify 0 and -0 have the same hash
+    let k1 = Decimal::from_str("0").unwrap();
+    let k2 = Decimal::from_str("-0").unwrap();
+    assert_eq!("-0", k2.to_string());
+    assert_eq!(k1, k2);
+    let h1 = hash_it(k1);
+    let h2 = hash_it(k2);
+    assert_eq!(h1, h2);
+
+    // Verify 0 and -0.0 have the same hash
+    let k1 = Decimal::from_str("0").unwrap();
+    let k2 = Decimal::from_str("-0.0").unwrap();
+    assert_eq!("-0.0", k2.to_string());
+    assert_eq!(k1, k2);
+    let h1 = hash_it(k1);
+    let h2 = hash_it(k2);
+    assert_eq!(h1, h2);
 }

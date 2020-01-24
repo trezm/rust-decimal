@@ -221,21 +221,21 @@ impl Decimal {
         let err = Error::new("Failed to parse");
         let mut split = value.splitn(2, 'e');
 
-        let base = split.next().ok_or(err.clone())?;
-        let mut scale = split.next().ok_or(err.clone())?.to_string();
+        let base = split.next().ok_or_else(|| err.clone())?;
+        let mut scale = split.next().ok_or_else(|| err.clone())?.to_string();
 
         let mut ret = Decimal::from_str(base)?;
 
         if scale.contains('-') {
             scale.remove(0);
-            let scale: u32 = scale.as_str().parse().map_err(move |_| err.clone())?;
+            let scale: u32 = scale.as_str().parse().map_err(move |_| err)?;
             let current_scale = ret.scale();
             ret.set_scale(current_scale + scale)?;
         } else {
             if scale.contains('+') {
                 scale.remove(0);
             }
-            let pow: u32 = scale.as_str().parse().map_err(move |_| err.clone())?;
+            let pow: u32 = scale.as_str().parse().map_err(move |_| err)?;
             ret *= Decimal::from_i64(10_i64.pow(pow)).unwrap();
             ret = ret.normalize();
         }
@@ -507,7 +507,7 @@ impl Decimal {
         }
     }
 
-    /// Strips any trailing zero's from a `Decimal`.
+    /// Strips any trailing zero's from a `Decimal` and converts -0 to 0.
     ///
     /// # Example
     ///
@@ -519,6 +519,11 @@ impl Decimal {
     /// assert_eq!(number.normalize().to_string(), "3.1");
     /// ```
     pub fn normalize(&self) -> Decimal {
+        if self.is_zero() {
+            // Convert -0, -0.0*, or 0.0* to 0.
+            return Decimal::zero();
+        }
+
         let mut scale = self.scale();
         if scale == 0 {
             // Nothing to do
@@ -665,12 +670,11 @@ impl Decimal {
                     _ => {}
                 }
             }
-            RoundingStrategy::RoundHalfDown => match order {
-                Ordering::Greater => {
+            RoundingStrategy::RoundHalfDown => {
+                if let Ordering::Greater = order {
                     add_internal(&mut value, &ONE_INTERNAL_REPR);
                 }
-                _ => {}
-            },
+            }
             RoundingStrategy::RoundHalfUp => {
                 // when Ordering::Equal, decimal_portion is 0.5 exactly
                 // when Ordering::Greater, decimal_portion is > 0.5
@@ -1037,7 +1041,7 @@ impl Decimal {
                 if final_scale > 9 {
                     // Since 10^10 doesn't fit into u32, we divide by 10^10/4
                     // and multiply the next divisor by 4.
-                    rem_lo = div_by_u32(&mut u64_result, 2500000000);
+                    rem_lo = div_by_u32(&mut u64_result, 2_500_000_000);
                     power = POWERS_10[final_scale as usize - 10] << 2;
                 } else {
                     power = POWERS_10[final_scale as usize];
@@ -1437,11 +1441,11 @@ fn rescale(left: &mut [u32; 3], left_scale: &mut u32, right: &mut [u32; 3], righ
         Target::Left => {
             *left_scale -= diff;
             *right_scale = *left_scale;
-        },
+        }
         Target::Right => {
             *right_scale -= diff;
             *left_scale = *right_scale;
-        },
+        }
     }
 
     if diff == 0 {
@@ -2627,7 +2631,8 @@ impl Eq for Decimal {}
 
 impl Hash for Decimal {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.data.hash(state);
+        let n = self.normalize();
+        n.data.hash(state);
     }
 }
 
@@ -2644,8 +2649,14 @@ impl Ord for Decimal {
         let self_negative = self.is_sign_negative();
         let other_negative = other.is_sign_negative();
         if self_negative && !other_negative {
+            if self.is_zero() && other.is_zero() {
+                return Ordering::Equal;
+            }
             return Ordering::Less;
         } else if !self_negative && other_negative {
+            if self.is_zero() && other.is_zero() {
+                return Ordering::Equal;
+            }
             return Ordering::Greater;
         }
 
@@ -2684,7 +2695,7 @@ impl Sum for Decimal {
         for i in iter {
             sum += i;
         }
-        return sum;
+        sum
     }
 }
 
