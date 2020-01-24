@@ -134,8 +134,10 @@ impl Decimal {
     /// ```
     pub fn new(num: i128, scale: u32) -> Decimal {
         if scale > MAX_PRECISION {
-            panic!("Scale exceeds the maximum precision allowed: {} > {}",
-                                          scale, MAX_PRECISION);
+            panic!(
+                "Scale exceeds the maximum precision allowed: {} > {}",
+                scale, MAX_PRECISION
+            );
         }
         let mut sign = 0;
         let mut wrapped = num;
@@ -198,7 +200,7 @@ impl Decimal {
     /// ```
     pub const fn from_parts(value: u128, negative: bool, scale: u32) -> Decimal {
         Decimal {
-            data: flags(negative, scale) | (value & VALUE_MASK)
+            data: flags(negative, scale) | (value & VALUE_MASK),
         }
     }
 
@@ -344,10 +346,22 @@ impl Decimal {
     /// * Bytes 13-16: high portion of `m`
     pub const fn deserialize(bytes: [u8; 16]) -> Decimal {
         Decimal {
-            data: (bytes[0] as u128) << 96 | (bytes[1] as u128) << 104 | (bytes[2] as u128) << 112 | (bytes[3] as u128) << 120 |
-                (bytes[4] as u128) | (bytes[5] as u128) << 8 | (bytes[6] as u128) << 16 | (bytes[7] as u128) << 24 |
-                (bytes[8] as u128) << 32 | (bytes[9] as u128) << 40 | (bytes[10] as u128) << 48 | (bytes[11] as u128) << 56 |
-                (bytes[12] as u128) << 64 | (bytes[13] as u128) << 72 | (bytes[14] as u128) << 80 | (bytes[15] as u128) << 88,
+            data: (bytes[0] as u128) << 96
+                | (bytes[1] as u128) << 104
+                | (bytes[2] as u128) << 112
+                | (bytes[3] as u128) << 120
+                | (bytes[4] as u128)
+                | (bytes[5] as u128) << 8
+                | (bytes[6] as u128) << 16
+                | (bytes[7] as u128) << 24
+                | (bytes[8] as u128) << 32
+                | (bytes[9] as u128) << 40
+                | (bytes[10] as u128) << 48
+                | (bytes[11] as u128) << 56
+                | (bytes[12] as u128) << 64
+                | (bytes[13] as u128) << 72
+                | (bytes[14] as u128) << 80
+                | (bytes[15] as u128) << 88,
         }
     }
 
@@ -692,13 +706,7 @@ impl Decimal {
         }
 
         // TODO: remove u32 logic
-        Decimal::from_legacy_parts(
-            value[0],
-            value[1],
-            value[2],
-            negative,
-            dp,
-        )
+        Decimal::from_legacy_parts(value[0], value[1], value[2], negative, dp)
     }
 
     /// Returns a new `Decimal` number with the specified number of decimal points for fractional portion.
@@ -769,7 +777,7 @@ impl Decimal {
     }
 
     fn base2_to_decimal(bits: &mut [u32; 3], exponent2: i32, positive: bool, is64: bool) -> Option<Self> {
-        const U32_SIGN_BIT : u32 = 0x8000_0000;
+        const U32_SIGN_BIT: u32 = 0x8000_0000;
 
         // 2^exponent2 = (10^exponent2)/(5^exponent2)
         //             = (5^-exponent2)*(10^exponent2)
@@ -901,15 +909,13 @@ impl Decimal {
         }
 
         // TODO: Remove dependency on u32
-        Some(
-            Decimal::from_legacy_parts(
-                bits[0],
-                bits[1],
-                bits[2],
-                !positive,
-                -exponent10 as u32
-            )
-        )
+        Some(Decimal::from_legacy_parts(
+            bits[0],
+            bits[1],
+            bits[2],
+            !positive,
+            -exponent10 as u32,
+        ))
     }
 
     /// Checked addition. Computes `self + other`, returning `None` if overflow occurred.
@@ -982,15 +988,7 @@ impl Decimal {
             my[2] = temp[2];
         }
         // TODO: Remove dependency on u32
-        Some(
-            Decimal::from_legacy_parts(
-                my[0],
-                my[1],
-                my[2],
-                negative,
-                final_scale,
-            )
-        )
+        Some(Decimal::from_legacy_parts(my[0], my[1], my[2], negative, final_scale))
     }
 
     /// Checked subtraction. Computes `self - other`, returning `None` if overflow occurred.
@@ -1060,15 +1058,13 @@ impl Decimal {
                 final_scale = MAX_PRECISION;
             }
             // TODO: Remove dependency on u32
-            return Some(
-                Decimal::from_legacy_parts(
-                    u64_result[0],
-                    u64_result[1],
-                    0,
-                    negative,
-                    final_scale,
-                )
-            );
+            return Some(Decimal::from_legacy_parts(
+                u64_result[0],
+                u64_result[1],
+                0,
+                negative,
+                final_scale,
+            ));
         }
 
         // We're using some of the high bits, so we essentially perform
@@ -1174,15 +1170,13 @@ impl Decimal {
         }
 
         // TODO: Remove dependency on u32
-        Some(
-            Decimal::from_legacy_parts(
-                product[0],
-                product[1],
-                product[2],
-                negative,
-                final_scale,
-            )
-        )
+        Some(Decimal::from_legacy_parts(
+            product[0],
+            product[1],
+            product[2],
+            negative,
+            final_scale,
+        ))
     }
 
     /// Checked division. Computes `self / other`, returning `None` if `other == 0.0` or the
@@ -1308,15 +1302,13 @@ impl Decimal {
         }
 
         // TODO: Remove dependency on u32
-        DivResult::Ok(
-            Decimal::from_legacy_parts(
-                quotient[0],
-                quotient[1],
-                quotient[2],
-                quotient_negative,
-                final_scale,
-            )
-        )
+        DivResult::Ok(Decimal::from_legacy_parts(
+            quotient[0],
+            quotient[1],
+            quotient[2],
+            quotient_negative,
+            final_scale,
+        ))
     }
 
     /// Checked remainder. Computes `self % other`, returning `None` if `other == 0.0`.
@@ -1361,15 +1353,13 @@ impl Decimal {
         }
 
         // TODO: Remove dependency on u32
-        Some(
-            Decimal::from_legacy_parts(
-                working_remainder[0],
-                working_remainder[1],
-                working_remainder[2],
-                self.is_sign_negative(),
-                quotient_scale,
-            )
-        )
+        Some(Decimal::from_legacy_parts(
+            working_remainder[0],
+            working_remainder[1],
+            working_remainder[2],
+            self.is_sign_negative(),
+            quotient_scale,
+        ))
     }
 }
 
@@ -1989,9 +1979,7 @@ macro_rules! forward_all_binop {
 
 impl Zero for Decimal {
     fn zero() -> Decimal {
-        Decimal {
-            data: 0,
-        }
+        Decimal { data: 0 }
     }
 
     fn is_zero(&self) -> bool {
@@ -2001,9 +1989,7 @@ impl Zero for Decimal {
 
 impl One for Decimal {
     fn one() -> Decimal {
-        Decimal {
-            data: 1,
-        }
+        Decimal { data: 1 }
     }
 }
 
@@ -2157,15 +2143,7 @@ impl FromStr for Decimal {
             }
         }
 
-        Ok(
-            Decimal::from_legacy_parts(
-                data[0],
-                data[1],
-                data[2],
-                negative,
-                scale,
-            )
-        )
+        Ok(Decimal::from_legacy_parts(data[0], data[1], data[2], negative, scale))
     }
 }
 
@@ -2176,9 +2154,7 @@ fn i128_to_decimal(n: i128) -> Option<Decimal> {
     } else {
         value = (n.wrapping_neg() as u128) | SIGN_MASK;
     }
-    Some(Decimal {
-        data: value,
-    })
+    Some(Decimal { data: value })
 }
 
 impl FromPrimitive for Decimal {
@@ -2191,15 +2167,11 @@ impl FromPrimitive for Decimal {
     }
 
     fn from_u32(n: u32) -> Option<Decimal> {
-        Some(Decimal {
-            data: n as u128
-        })
+        Some(Decimal { data: n as u128 })
     }
 
     fn from_u64(n: u64) -> Option<Decimal> {
-        Some(Decimal {
-            data: n as u128,
-        })
+        Some(Decimal { data: n as u128 })
     }
 
     fn from_f32(n: f32) -> Option<Decimal> {
@@ -2410,7 +2382,7 @@ impl Neg for Decimal {
 
     fn neg(self) -> Decimal {
         Decimal {
-            data: self.data | SIGN_MASK
+            data: self.data | SIGN_MASK,
         }
     }
 }
@@ -2420,7 +2392,7 @@ impl<'a> Neg for &'a Decimal {
 
     fn neg(self) -> Decimal {
         Decimal {
-            data: self.data | SIGN_MASK
+            data: self.data | SIGN_MASK,
         }
     }
 }
@@ -2678,7 +2650,7 @@ impl Ord for Decimal {
         let mut right_scale = right.scale();
 
         if left_scale == right_scale {
-            return (left.data & VALUE_MASK).cmp(&(right.data & VALUE_MASK))
+            return (left.data & VALUE_MASK).cmp(&(right.data & VALUE_MASK));
         }
 
         // Rescale and compare
