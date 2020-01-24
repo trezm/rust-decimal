@@ -104,7 +104,7 @@ pub struct Decimal {
 #[derive(Clone, Copy)]
 pub enum Sign {
     Positive,
-    Negative
+    Negative,
 }
 
 /// `RoundingStrategy` represents the different strategies that can be used by
