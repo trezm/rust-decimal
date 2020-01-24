@@ -101,6 +101,12 @@ pub struct Decimal {
     data: u128,
 }
 
+#[derive(Clone, Copy)]
+pub enum Sign {
+    Positive,
+    Negative
+}
+
 /// `RoundingStrategy` represents the different strategies that can be used by
 /// `round_dp_with_strategy`.
 ///
@@ -268,17 +274,16 @@ impl Decimal {
     /// # Example
     ///
     /// ```
-    /// use rust_decimal::Decimal;
+    /// use rust_decimal::{Decimal, Sign};
     ///
     /// let mut one = Decimal::new(1, 0);
-    /// one.set_sign(false);
+    /// one.set_sign(Sign::Negative);
     /// assert_eq!(one.to_string(), "-1");
     /// ```
-    pub fn set_sign(&mut self, positive: bool) {
-        if positive {
-            self.data &= UNSIGN_MASK;
-        } else {
-            self.data |= SIGN_MASK;
+    pub fn set_sign(&mut self, sign: Sign) {
+        match sign {
+            Sign::Positive => self.data &= UNSIGN_MASK,
+            Sign::Negative => self.data |= SIGN_MASK,
         }
     }
 
@@ -464,7 +469,7 @@ impl Decimal {
     /// ```
     pub fn abs(&self) -> Decimal {
         let mut me = *self;
-        me.set_sign(true);
+        me.set_sign(Sign::Positive);
         me
     }
 
@@ -2194,7 +2199,7 @@ impl FromPrimitive for Decimal {
         if biased_exponent == 0 && mantissa == 0 {
             let mut zero = Decimal::zero();
             if !positive {
-                zero.set_sign(false);
+                zero.set_sign(Sign::Negative);
             }
             return Some(zero);
         }
@@ -2238,7 +2243,7 @@ impl FromPrimitive for Decimal {
         if biased_exponent == 0 && mantissa == 0 {
             let mut zero = Decimal::zero();
             if !positive {
-                zero.set_sign(false);
+                zero.set_sign(Sign::Negative);
             }
             return Some(zero);
         }
