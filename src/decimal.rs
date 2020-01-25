@@ -2097,17 +2097,13 @@ impl FromStr for Decimal {
         };
 
         // Parse this using base 10 (future allow using radix?)
-        let mut data = [0u32, 0u32, 0u32];
-        let mut tmp = [0u32, 0u32, 0u32];
+        let mut data: u128 = 0;
+        let mut tmp: u128;
         let len = coeff.len();
         for (i, digit) in coeff.iter().enumerate() {
             // If the data is going to overflow then we should go into recovery mode
-            tmp[0] = data[0];
-            tmp[1] = data[1];
-            tmp[2] = data[2];
-            let overflow = mul_by_u32(&mut tmp, 10u32);
-            if overflow > 0 {
-                // This indicates a bug in the coeeficient rounding above.
+            tmp = data * 10;
+            if (tmp >> 96) > 0 {
                 // If this is the last position, then round and forget it.
                 // Otherwise, we have more of an issue.
                 if i + 1 < len {
@@ -2115,8 +2111,8 @@ impl FromStr for Decimal {
                 }
 
                 if *digit >= 5 {
-                    let carry = add_internal(&mut data, &ONE_INTERNAL_REPR);
-                    if carry > 0 {
+                    data += 1;
+                    if (data >> 96) > 0 {
                         // Highly unlikely scenario which is more indicative of a bug
                         return Err(Error::new("Invalid decimal: overflow when rounding"));
                     }
@@ -2125,18 +2121,15 @@ impl FromStr for Decimal {
                 scale -= (len - i) as u32;
                 break;
             } else {
-                data[0] = tmp[0];
-                data[1] = tmp[1];
-                data[2] = tmp[2];
-                let carry = add_internal(&mut data, &[*digit]);
-                if carry > 0 {
+                data = tmp + u128::from(*digit);
+                if (data >> 96) > 0 {
                     // Highly unlikely scenario which is more indicative of a bug
                     return Err(Error::new("Invalid decimal: overflow from carry"));
                 }
             }
         }
 
-        Ok(Decimal::from_legacy_parts(data[0], data[1], data[2], negative, scale))
+        Ok(Decimal::from_parts(data, negative, scale))
     }
 }
 
