@@ -917,73 +917,63 @@ impl Decimal {
     #[inline(always)]
     pub fn checked_add(self, other: Decimal) -> Option<Decimal> {
         // Convert to the same scale
-        let mut my = self.to_lo_mid_hi();
+        let mut my = self.value();
         let mut my_scale = self.scale();
-        let mut ot = other.to_lo_mid_hi();
+        let mut ot = other.value();
         let mut other_scale = other.scale();
-        rescale_legacy(&mut my, &mut my_scale, &mut ot, &mut other_scale);
+        rescale(&mut my, &mut my_scale, &mut ot, &mut other_scale);
         let mut final_scale = my_scale.max(other_scale);
 
         // Add the items together
         let my_negative = self.is_sign_negative();
         let other_negative = other.is_sign_negative();
         let mut negative = false;
-        let carry;
         if !(my_negative ^ other_negative) {
             negative = my_negative;
-            carry = add3_internal(&mut my, &ot);
+            my += ot;
         } else {
-            let cmp = cmp_internal(&my, &ot);
+            let cmp = my.cmp(&ot);
             // -x + y
             // if x > y then it's negative (i.e. -2 + 1)
             match cmp {
                 Ordering::Less => {
                     negative = other_negative;
-                    sub3_internal(&mut ot, &my);
-                    my[0] = ot[0];
-                    my[1] = ot[1];
-                    my[2] = ot[2];
+                    my = ot - my;
                 }
                 Ordering::Greater => {
                     negative = my_negative;
-                    sub3_internal(&mut my, &ot);
+                    my -= ot;
                 }
                 Ordering::Equal => {
                     // -2 + 2
-                    my[0] = 0;
-                    my[1] = 0;
-                    my[2] = 0;
+                    my = 0;
                 }
             }
-            carry = 0;
         }
 
         // If we have a carry we underflowed.
         // We need to lose some significant digits (if possible)
-        if carry > 0 {
+        if (my >> OVERFLOW_SHIFT) > 0 {
             if final_scale == 0 {
                 return None;
             }
 
             // Copy it over to a temp array for modification
-            let mut temp = [my[0], my[1], my[2], carry];
-            while final_scale > 0 && temp[3] != 0 {
-                div_by_u32(&mut temp, 10);
+            let mut temp = my;
+            while final_scale > 0 && (temp >> OVERFLOW_SHIFT) > 0 {
+                temp /= 10;
                 final_scale -= 1;
             }
 
             // If we still have a carry bit then we overflowed
-            if temp[3] > 0 {
+            if (temp >> OVERFLOW_SHIFT) > 0 {
                 return None;
             }
 
             // Copy it back - we're done
-            my[0] = temp[0];
-            my[1] = temp[1];
-            my[2] = temp[2];
+            my = temp;
         }
-        // TODO: Remove dependency on u32
-        Some(Decimal::from_legacy_parts(my[0], my[1], my[2], negative, final_scale))
+        Some(Decimal::from_parts(my, negative, final_scale))
     }
 
     /// Checked subtraction. Computes `self - other`, returning `None` if overflow occurred.
@@ -1610,19 +1600,6 @@ fn add_internal(value: &mut [u32], by: &[u32]) -> u32 {
     carry as u32
 }
 
-#[inline]
-fn add3_internal(value: &mut [u32; 3], by: &[u32; 3]) -> u32 {
-    let mut carry: u32 = 0;
-    let bl = by.len();
-    for i in 0..bl {
-        let res1 = value[i].overflowing_add(by[i]);
-        let res2 = res1.0.overflowing_add(carry);
-        value[i] = res2.0;
-        carry = (res1.1 | res2.1) as u32;
-    }
-    carry
-}
-
 fn add_with_scale_internal(
     quotient: &mut [u32; 3],
     quotient_scale: &mut i32,
@@ -1761,17 +1738,6 @@ fn add_with_scale_internal(
 fn add_part(left: u32, right: u32) -> (u32, u32) {
     let added = u64::from(left) + u64::from(right);
     ((added & U32_MASK) as u32, (added >> 32 & U32_MASK) as u32)
-}
-
-#[inline(always)]
-fn sub3_internal(value: &mut [u32; 3], by: &[u32; 3]) {
-    let mut overflow = 0;
-    let vl = value.len();
-    for i in 0..vl {
-        let part = (0x1_0000_0000u64 + u64::from(value[i])) - (u64::from(by[i]) + overflow);
-        value[i] = part as u32;
-        overflow = 1 - (part >> 32);
-    }
 }
 
 fn sub_internal(value: &mut [u32], by: &[u32]) -> u32 {
