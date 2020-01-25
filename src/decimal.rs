@@ -33,6 +33,8 @@ const U32_MASK: u64 = 0xFFFF_FFFF;
 const SCALE_SHIFT: u128 = 112;
 // Number of bits sign is shifted by.
 const SIGN_SHIFT: u128 = 127;
+// Number of bits to shift right to check for overflow
+const OVERFLOW_SHIFT: u128 = 96;
 
 // The maximum supported precision
 const MAX_PRECISION: u32 = 28;
@@ -320,7 +322,7 @@ impl Decimal {
     pub const fn serialize(&self) -> [u8; 16] {
         [
             // flags
-            ((self.data >> 96) & U8_MASK) as u8,
+            ((self.data >> OVERFLOW_SHIFT) & U8_MASK) as u8,
             ((self.data >> 104) & U8_MASK) as u8,
             ((self.data >> 112) & U8_MASK) as u8,
             ((self.data >> 120) & U8_MASK) as u8,
@@ -744,7 +746,7 @@ impl Decimal {
         UnpackedDecimal {
             is_negative: self.is_sign_negative(),
             scale: self.scale(),
-            value: self.data & VALUE_MASK,
+            value: self.value(),
         }
     }
 
@@ -919,7 +921,7 @@ impl Decimal {
         let mut my_scale = self.scale();
         let mut ot = other.to_lo_mid_hi();
         let mut other_scale = other.scale();
-        rescale(&mut my, &mut my_scale, &mut ot, &mut other_scale);
+        rescale_legacy(&mut my, &mut my_scale, &mut ot, &mut other_scale);
         let mut final_scale = my_scale.max(other_scale);
 
         // Add the items together
@@ -1319,7 +1321,7 @@ impl Decimal {
         let mut quotient_scale = initial_scale;
         let mut divisor = other.to_lo_mid_hi();
         let mut divisor_scale = other.scale();
-        rescale(&mut quotient, &mut quotient_scale, &mut divisor, &mut divisor_scale);
+        rescale_legacy(&mut quotient, &mut quotient_scale, &mut divisor, &mut divisor_scale);
 
         // Working is the remainder + the quotient
         // We use an aligned array since we'll be using it a lot.
@@ -1354,6 +1356,11 @@ impl Decimal {
             quotient_scale,
         ))
     }
+
+    #[inline(always)]
+    const fn value(&self) -> u128 {
+        self.data & VALUE_MASK
+    }
 }
 
 impl Default for Decimal {
@@ -1373,13 +1380,99 @@ const fn flags(neg: bool, scale: u32) -> u128 {
     ((scale as u128) << SCALE_SHIFT) | ((neg as u128) << SIGN_SHIFT)
 }
 
+fn rescale(left: &mut u128, left_scale: &mut u32, right: &mut u128, right_scale: &mut u32) {
+    if left_scale == right_scale {
+        // Nothing to do
+        return;
+    }
+
+    if *left == 0 {
+        *left_scale = *right_scale;
+        return;
+    } else if *right == 0 {
+        *right_scale = *left_scale;
+        return;
+    }
+
+    enum Target {
+        Left,
+        Right,
+    }
+
+    let target; // The target which we're aiming for
+    let mut diff;
+    let my;
+    let other;
+    if left_scale > right_scale {
+        diff = *left_scale - *right_scale;
+        my = right;
+        other = left;
+        target = Target::Left;
+    } else {
+        diff = *right_scale - *left_scale;
+        my = left;
+        other = right;
+        target = Target::Right;
+    };
+
+    let mut working;
+    while diff > 0 {
+        working = *my * 10;
+        if (working >> OVERFLOW_SHIFT) > 0 {
+            break;
+        }
+        *my = working;
+        diff -= 1;
+    }
+    println!("my: {}, diff: {}", *my, diff);
+
+    match target {
+        Target::Left => {
+            *left_scale -= diff;
+            *right_scale = *left_scale;
+        }
+        Target::Right => {
+            *right_scale -= diff;
+            *left_scale = *right_scale;
+        }
+    }
+
+    if diff == 0 {
+        // We're done - same scale
+        return;
+    }
+
+    // Scaling further isn't possible since we got an overflow
+    // In this case we need to reduce the accuracy of the "side to keep"
+
+    // Now do the necessary rounding
+    let mut remainder = 0;
+    while diff > 0 {
+        if *other == 0 {
+            return;
+        }
+
+        diff -= 1;
+
+        // Any remainder is discarded if diff > 0 still (i.e. lost precision)
+        remainder = *other % 10;
+        *other /= 10;
+    }
+    if remainder >= 5 {
+        *other += 1;
+
+        // Questionable whether we need this
+        *other &= VALUE_MASK;
+    }
+}
+
 /// Rescales the given decimals to equivalent scales.
 /// It will firstly try to scale both the left and the right side to
 /// the maximum scale of left/right. If it is unable to do that it
 /// will try to reduce the accuracy of the other argument.
 /// e.g. with 1.23 and 2.345 it'll rescale the first arg to 1.230
 #[inline(always)]
-fn rescale(left: &mut [u32; 3], left_scale: &mut u32, right: &mut [u32; 3], right_scale: &mut u32) {
+fn rescale_legacy(left: &mut [u32; 3], left_scale: &mut u32, right: &mut [u32; 3], right_scale: &mut u32) {
     if left_scale == right_scale {
         // Nothing to do
         return;
@@ -1976,7 +2069,7 @@ impl Zero for Decimal {
     }
 
     fn is_zero(&self) -> bool {
-        (self.data & VALUE_MASK) == 0
+        self.value() == 0
     }
 }
 
@@ -2103,7 +2196,7 @@ impl FromStr for Decimal {
         for (i, digit) in coeff.iter().enumerate() {
             // If the data is going to overflow then we should go into recovery mode
             tmp = data * 10;
-            if (tmp >> 96) > 0 {
+            if (tmp >> OVERFLOW_SHIFT) > 0 {
                 // If this is the last position, then round and forget it.
                 // Otherwise, we have more of an issue.
                 if i + 1 < len {
@@ -2112,7 +2205,7 @@ impl FromStr for Decimal {
 
                 if *digit >= 5 {
                     data += 1;
-                    if (data >> 96) > 0 {
+                    if (data >> OVERFLOW_SHIFT) > 0 {
                         // Highly unlikely scenario which is more indicative of a bug
                         return Err(Error::new("Invalid decimal: overflow when rounding"));
                     }
@@ -2122,7 +2215,7 @@ impl FromStr for Decimal {
                 break;
             } else {
                 data = tmp + u128::from(*digit);
-                if (data >> 96) > 0 {
+                if (data >> OVERFLOW_SHIFT) > 0 {
                     // Highly unlikely scenario which is more indicative of a bug
                     return Err(Error::new("Invalid decimal: overflow from carry"));
                 }
@@ -2257,12 +2350,12 @@ impl ToPrimitive for Decimal {
     fn to_i64(&self) -> Option<i64> {
         let d = self.trunc();
         // Quick overflow check - 63 to address the sign bit also.
-        if ((d.data & VALUE_MASK) >> 63) > 0 {
+        if (d.value() >> 63) > 0 {
             // Overflow
             return None;
         }
 
-        let raw: i64 = (d.data & VALUE_MASK) as i64;
+        let raw: i64 = d.value() as i64;
         if self.is_sign_negative() {
             Some(-raw)
         } else {
@@ -2276,12 +2369,12 @@ impl ToPrimitive for Decimal {
         }
 
         let d = self.trunc();
-        if ((d.data & VALUE_MASK) >> 64) > 0 {
+        if (d.value() >> 64) > 0 {
             // Overflow
             return None;
         }
 
-        Some((d.data & VALUE_MASK) as u64)
+        Some(d.value() as u64)
     }
 
     fn to_f64(&self) -> Option<f64> {
@@ -2636,14 +2729,14 @@ impl Ord for Decimal {
         let mut right_scale = right.scale();
 
         if left_scale == right_scale {
-            return (left.data & VALUE_MASK).cmp(&(right.data & VALUE_MASK));
+            return left.value().cmp(&(right.value()));
         }
 
         // Rescale and compare
-        let mut left_raw = left.to_lo_mid_hi();
-        let mut right_raw = right.to_lo_mid_hi();
-        rescale(&mut left_raw, &mut left_scale, &mut right_raw, &mut right_scale);
-        cmp_internal(&left_raw, &right_raw)
+        let mut left_copy = left.value();
+        let mut right_copy = right.value();
+        rescale(&mut left_copy, &mut left_scale, &mut right_copy, &mut right_scale);
+        left_copy.cmp(&right_copy)
     }
 }
 
@@ -2666,10 +2759,77 @@ mod test {
     use super::*;
 
     #[test]
-    fn it_can_rescale() {
+    fn it_can_rescale_legacy() {
         fn extract(value: &str) -> ([u32; 3], u32) {
             let v = Decimal::from_str(value).unwrap();
             (v.to_lo_mid_hi(), v.scale())
+        }
+
+        let tests = &[
+            ("1", "1", "1", "1"),
+            ("1", "1.0", "1.0", "1.0"),
+            ("1", "1.00000", "1.00000", "1.00000"),
+            ("1", "1.0000000000", "1.0000000000", "1.0000000000"),
+            (
+                "1",
+                "1.00000000000000000000",
+                "1.00000000000000000000",
+                "1.00000000000000000000",
+            ),
+            ("1.1", "1.1", "1.1", "1.1"),
+            ("1.1", "1.10000", "1.10000", "1.10000"),
+            ("1.1", "1.1000000000", "1.1000000000", "1.1000000000"),
+            (
+                "1.1",
+                "1.10000000000000000000",
+                "1.10000000000000000000",
+                "1.10000000000000000000",
+            ),
+            (
+                "0.6386554621848739495798319328",
+                "11.815126050420168067226890757",
+                "0.638655462184873949579831933",
+                "11.815126050420168067226890757",
+            ),
+            (
+                "0.0872727272727272727272727272", // Scale 28
+                "843.65000000",                   // Scale 8
+                "0.0872727272727272727272727",    // 25
+                "843.6500000000000000000000000",  // 25
+            ),
+        ];
+
+        for &(left_raw, right_raw, expected_left, expected_right) in tests {
+            // Left = the value to rescale
+            // Right = the new scale we're scaling to
+            // Expected = the expected left value after rescale
+            let (expected_left, expected_lscale) = extract(expected_left);
+            let (expected_right, expected_rscale) = extract(expected_right);
+
+            let (mut left, mut left_scale) = extract(left_raw);
+            let (mut right, mut right_scale) = extract(right_raw);
+            rescale_legacy(&mut left, &mut left_scale, &mut right, &mut right_scale);
+            assert_eq!(left, expected_left, "L, LR: {}, RR: {}", left_raw, right_raw);
+            assert_eq!(left_scale, expected_lscale, "LS, LR: {}, RR: {}", left_raw, right_raw);
+            assert_eq!(right, expected_right, "R, LR: {}, RR: {}", left_raw, right_raw);
+            assert_eq!(right_scale, expected_rscale, "RS, LR: {}, RR: {}", left_raw, right_raw);
+
+            // Also test the transitive case
+            let (mut left, mut left_scale) = extract(left_raw);
+            let (mut right, mut right_scale) = extract(right_raw);
+            rescale_legacy(&mut right, &mut right_scale, &mut left, &mut left_scale);
+            assert_eq!(left, expected_left, "TL, LR: {}, RR: {}", left_raw, right_raw);
+            assert_eq!(left_scale, expected_lscale, "TLS, LR: {}, RR: {}", left_raw, right_raw);
+            assert_eq!(right, expected_right, "TR, LR: {}, RR: {}", left_raw, right_raw);
+            assert_eq!(right_scale, expected_rscale, "TRS, LR: {}, RR: {}", left_raw, right_raw);
+        }
+    }
+
+    #[test]
+    fn it_can_rescale() {
+        fn extract(value: &str) -> (u128, u32) {
+            let v = Decimal::from_str(value).unwrap();
+            (v.value(), v.scale())
         }
 
         let tests = &[
