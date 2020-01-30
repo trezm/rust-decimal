@@ -65,20 +65,6 @@ static POWERS_10: [u32; 10] = [
     100_000_000,
     1_000_000_000,
 ];
-// Fast access for 10^n where n is 10-19
-#[allow(dead_code)]
-static BIG_POWERS_10: [u64; 10] = [
-    10_000_000_000,
-    100_000_000_000,
-    1_000_000_000_000,
-    10_000_000_000_000,
-    100_000_000_000_000,
-    1_000_000_000_000_000,
-    10_000_000_000_000_000,
-    100_000_000_000_000_000,
-    1_000_000_000_000_000_000,
-    10_000_000_000_000_000_000,
-];
 
 /// `UnpackedDecimal` contains unpacked representation of `Decimal` where each component
 /// of decimal-format stored in it's own field
@@ -953,20 +939,20 @@ impl Decimal {
 
         // If we have a carry we underflowed.
         // We need to lose some significant digits (if possible)
-        if (my >> OVERFLOW_SHIFT) > 0 {
+        if my > VALUE_MASK {
             if final_scale == 0 {
                 return None;
             }
 
             // Copy it over to a temp array for modification
             let mut temp = my;
-            while final_scale > 0 && (temp >> OVERFLOW_SHIFT) > 0 {
+            while final_scale > 0 && temp > VALUE_MASK {
                 temp /= 10;
                 final_scale -= 1;
             }
 
             // If we still have a carry bit then we overflowed
-            if (temp >> OVERFLOW_SHIFT) > 0 {
+            if temp > VALUE_MASK {
                 return None;
             }
 
@@ -2723,73 +2709,6 @@ mod test {
     // All public tests should go under `tests/`.
 
     use super::*;
-
-    #[test]
-    fn it_can_rescale_legacy() {
-        fn extract(value: &str) -> ([u32; 3], u32) {
-            let v = Decimal::from_str(value).unwrap();
-            (v.to_lo_mid_hi(), v.scale())
-        }
-
-        let tests = &[
-            ("1", "1", "1", "1"),
-            ("1", "1.0", "1.0", "1.0"),
-            ("1", "1.00000", "1.00000", "1.00000"),
-            ("1", "1.0000000000", "1.0000000000", "1.0000000000"),
-            (
-                "1",
-                "1.00000000000000000000",
-                "1.00000000000000000000",
-                "1.00000000000000000000",
-            ),
-            ("1.1", "1.1", "1.1", "1.1"),
-            ("1.1", "1.10000", "1.10000", "1.10000"),
-            ("1.1", "1.1000000000", "1.1000000000", "1.1000000000"),
-            (
-                "1.1",
-                "1.10000000000000000000",
-                "1.10000000000000000000",
-                "1.10000000000000000000",
-            ),
-            (
-                "0.6386554621848739495798319328",
-                "11.815126050420168067226890757",
-                "0.638655462184873949579831933",
-                "11.815126050420168067226890757",
-            ),
-            (
-                "0.0872727272727272727272727272", // Scale 28
-                "843.65000000",                   // Scale 8
-                "0.0872727272727272727272727",    // 25
-                "843.6500000000000000000000000",  // 25
-            ),
-        ];
-
-        for &(left_raw, right_raw, expected_left, expected_right) in tests {
-            // Left = the value to rescale
-            // Right = the new scale we're scaling to
-            // Expected = the expected left value after rescale
-            let (expected_left, expected_lscale) = extract(expected_left);
-            let (expected_right, expected_rscale) = extract(expected_right);
-
-            let (mut left, mut left_scale) = extract(left_raw);
-            let (mut right, mut right_scale) = extract(right_raw);
-            rescale_legacy(&mut left, &mut left_scale, &mut right, &mut right_scale);
-            assert_eq!(left, expected_left, "L, LR: {}, RR: {}", left_raw, right_raw);
-            assert_eq!(left_scale, expected_lscale, "LS, LR: {}, RR: {}", left_raw, right_raw);
-            assert_eq!(right, expected_right, "R, LR: {}, RR: {}", left_raw, right_raw);
-            assert_eq!(right_scale, expected_rscale, "RS, LR: {}, RR: {}", left_raw, right_raw);
-
-            // Also test the transitive case
-            let (mut left, mut left_scale) = extract(left_raw);
-            let (mut right, mut right_scale) = extract(right_raw);
-            rescale_legacy(&mut right, &mut right_scale, &mut left, &mut left_scale);
-            assert_eq!(left, expected_left, "TL, LR: {}, RR: {}", left_raw, right_raw);
-            assert_eq!(left_scale, expected_lscale, "TLS, LR: {}, RR: {}", left_raw, right_raw);
-            assert_eq!(right, expected_right, "TR, LR: {}, RR: {}", left_raw, right_raw);
-            assert_eq!(right_scale, expected_rscale, "TRS, LR: {}, RR: {}", left_raw, right_raw);
-        }
-    }
 
     #[test]
     fn it_can_rescale() {
