@@ -1609,3 +1609,13 @@ fn it_can_rescale() {
         assert_eq!(new_value.to_string(), value.to_string());
     }
 }
+
+#[test]
+fn it_can_instantiate_using_new() {
+    let tests = &[(10000, 0, "10000")];
+
+    for &(num, scale, expected_value) in tests {
+        let value = Decimal::new(num, scale);
+        assert_eq!(value.to_string(), expected_value);
+    }
+}
