@@ -852,5 +852,50 @@ mod postgres {
                 }
             }
         }
+
+        #[test]
+        fn nonqualified_numeric() {
+            let tests = [
+                ("10000", "10000"),
+                ("1", "1"),
+                ("1.234", "1.234"),
+            ];
+            let mut client = match Client::connect(&get_postgres_url(), NoTls) {
+                Ok(x) => x,
+                Err(err) => panic!("{:#?}", err),
+            };
+            for &(sent, expected) in tests.iter() {
+                let results = client.query(&*format!("SELECT {}::NUMERIC", sent), &[]).expect("Unexpected error");
+                let value: Decimal = results.iter().next().unwrap().get(0);
+                assert_eq!(expected, value.to_string());
+            }
+        }
+
+        #[tokio::test]
+        #[cfg(feature = "tokio-pg")]
+        async fn async_nonqualified_numeric() {
+            use ::futures::future::FutureExt;
+            use ::tokio_postgres::connect;
+
+            let tests = [
+                ("10000", "10000"),
+                ("1", "1"),
+                ("1.234", "1.234"),
+            ];
+            let (client, connection) = connect(&get_postgres_url(), NoTls).await.unwrap();
+            let connection = connection.map(|e| e.unwrap());
+            tokio::spawn(connection);
+
+            for &(sent, expected) in tests.iter() {
+                let statement = client
+                    .prepare(&*format!("SELECT {}::NUMERIC", sent))
+                    .await
+                    .unwrap();
+
+                let results = client.query(&statement, &[]).await.expect("Unexpected error");
+                let value: Decimal = results.iter().next().unwrap().get(0);
+                assert_eq!(expected, value.to_string());
+            }
+        }
     }
 }
